@@ -3,21 +3,25 @@
 import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { X, Copy, Check, Share2 } from 'lucide-react';
+import { UILanguage, UI_TRANSLATIONS } from '@/lib/i18n';
 
 interface QRCodeModalProps {
   isOpen: boolean;
   onClose: () => void;
   roomId: string;
+  uiLang?: UILanguage;
 }
 
-export function QRCodeModal({ isOpen, onClose, roomId }: QRCodeModalProps) {
+export function QRCodeModal({ isOpen, onClose, roomId, uiLang = 'en' }: QRCodeModalProps) {
   const [copied, setCopied] = useState(false);
+  const t = UI_TRANSLATIONS[uiLang];
 
   if (!isOpen) return null;
 
-  const roomUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}/room/${roomId}`
-    : `https://livelang.app/room/${roomId}`;
+  const roomUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/room/${roomId}`
+      : `https://livelang.app/room/${roomId}`;
 
   const handleCopy = async () => {
     try {
@@ -33,8 +37,8 @@ export function QRCodeModal({ isOpen, onClose, roomId }: QRCodeModalProps) {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'Unisciti alla stanza di traduzione LiveLang',
-          text: `Entra nella mia stanza di traduzione dal vivo: codice ${roomId}`,
+          title: 'LiveLang Translation Room',
+          text: `Join my live translation room: ${roomId}`,
           url: roomUrl,
         });
       } catch {
@@ -56,10 +60,8 @@ export function QRCodeModal({ isOpen, onClose, roomId }: QRCodeModalProps) {
           <X className="w-5 h-5" />
         </button>
 
-        <h3 className="text-xl font-bold text-white mb-1">Invita un altro telefono</h3>
-        <p className="text-xs text-slate-400 mb-5">
-          Fai inquadrare questo codice con la fotocamera per connettersi istantaneamente.
-        </p>
+        <h3 className="text-xl font-bold text-white mb-1">{t.qrTitle}</h3>
+        <p className="text-xs text-slate-400 mb-5">{t.qrSubtitle}</p>
 
         {/* QR Code Container */}
         <div className="bg-white p-4 rounded-2xl inline-block shadow-lg mb-4">
@@ -68,7 +70,9 @@ export function QRCodeModal({ isOpen, onClose, roomId }: QRCodeModalProps) {
 
         {/* Room Code */}
         <div className="mb-4">
-          <span className="text-xs text-slate-400 block uppercase tracking-wider mb-1">Codice Stanza</span>
+          <span className="text-xs text-slate-400 block uppercase tracking-wider mb-1">
+            {t.qrRoomCode}
+          </span>
           <span className="font-mono text-2xl font-bold tracking-widest text-indigo-400 bg-slate-900/80 px-4 py-1.5 rounded-xl border border-slate-800 inline-block">
             {roomId.toUpperCase()}
           </span>
@@ -83,12 +87,12 @@ export function QRCodeModal({ isOpen, onClose, roomId }: QRCodeModalProps) {
             {copied ? (
               <>
                 <Check className="w-4 h-4 text-emerald-400" />
-                <span>Copiato!</span>
+                <span>{t.qrCopied}</span>
               </>
             ) : (
               <>
                 <Copy className="w-4 h-4" />
-                <span>Copia Link</span>
+                <span>{t.qrCopyLink}</span>
               </>
             )}
           </button>
@@ -98,7 +102,7 @@ export function QRCodeModal({ isOpen, onClose, roomId }: QRCodeModalProps) {
             className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition shadow-lg shadow-indigo-600/30 active:scale-95"
           >
             <Share2 className="w-4 h-4" />
-            <span>Condividi</span>
+            <span>{t.qrShare}</span>
           </button>
         </div>
       </div>

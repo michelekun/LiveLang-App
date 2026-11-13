@@ -8,6 +8,7 @@ import { VoiceIndicator } from '@/components/VoiceIndicator';
 import { QRCodeModal } from '@/components/QRCodeModal';
 import { SpeechRecognizer, speakText } from '@/lib/speech';
 import { TranslationMessage, UserParticipant, RoomState } from '@/types';
+import { UILanguage, UI_TRANSLATIONS } from '@/lib/i18n';
 import {
   ArrowLeft,
   QrCode,
@@ -20,6 +21,7 @@ import {
   Info,
   Radio,
   Share2,
+  Globe,
 } from 'lucide-react';
 
 export default function RoomPage() {
@@ -30,17 +32,19 @@ export default function RoomPage() {
   const rawRoomId = (params?.id as string) || '';
   const roomId = rawRoomId.toLowerCase();
 
+  // UI Language State (en | ja)
+  const [uiLang, setUiLang] = useState<UILanguage>('en');
+
   // User State
   const [userId, setUserId] = useState<string>('');
   const [userName, setUserName] = useState<string>('');
-  const [userLang, setUserLang] = useState<string>('it');
+  const [userLang, setUserLang] = useState<string>('en');
   const [isConfigured, setIsConfigured] = useState<boolean>(false);
 
   // Room State
   const [participants, setParticipants] = useState<Record<string, UserParticipant>>({});
   const [messages, setMessages] = useState<TranslationMessage[]>([]);
   const [isQrOpen, setIsQrOpen] = useState<boolean>(false);
-  const [copied, setCopied] = useState<boolean>(false);
   const [ttsEnabled, setTtsEnabled] = useState<boolean>(false);
 
   // Audio & Speech State
@@ -58,8 +62,15 @@ export default function RoomPage() {
   const messagesRef = useRef<TranslationMessage[]>([]);
   messagesRef.current = messages;
 
-  // Inizializzazione utente da sessionStorage o modal
+  // Inizializzazione utente e UI language
   useEffect(() => {
+    // Carica preferenza lingua interfaccia
+    const savedUiLang = (localStorage.getItem('livelang_ui_lang') ||
+      sessionStorage.getItem('livelang_ui_lang')) as UILanguage | null;
+    if (savedUiLang === 'en' || savedUiLang === 'ja') {
+      setUiLang(savedUiLang);
+    }
+
     let savedId = sessionStorage.getItem('livelang_user_id');
     if (!savedId) {
       savedId = 'user_' + Math.random().toString(36).substring(2, 9);
@@ -74,8 +85,20 @@ export default function RoomPage() {
       setUserName(savedName);
       setUserLang(savedLang);
       setIsConfigured(true);
+    } else {
+      // Se è entrato direttamente con link o QR code
+      setUserLang(savedUiLang === 'ja' ? 'ja' : 'en');
     }
   }, []);
+
+  const t = UI_TRANSLATIONS[uiLang];
+
+  const handleToggleUiLang = () => {
+    const nextLang: UILanguage = uiLang === 'en' ? 'ja' : 'en';
+    setUiLang(nextLang);
+    localStorage.setItem('livelang_ui_lang', nextLang);
+    sessionStorage.setItem('livelang_ui_lang', nextLang);
+  };
 
   // Scorri automaticamente in basso all'arrivo di nuovi messaggi
   useEffect(() => {
@@ -122,7 +145,6 @@ export default function RoomPage() {
       setInterimText('');
 
       try {
-        // Raccogli tutte le lingue uniche presenti nella stanza
         const activeParticipants = Object.values(participants);
         const targetLangs = Array.from(
           new Set(
@@ -132,12 +154,10 @@ export default function RoomPage() {
           )
         );
 
-        // Se siamo da soli o gli altri parlano la stessa lingua, aggiungiamo inglese come traduzione di default
         if (targetLangs.length === 0) {
-          targetLangs.push(userLang === 'en' ? 'es' : 'en');
+          targetLangs.push(userLang === 'en' ? 'ja' : 'en');
         }
 
-        // Prepara la cronologia recente per dare contesto conversazionale a Gemini
         const recentHistory = messagesRef.current.slice(-5).map((m) => ({
           speaker: m.speakerName,
           text: m.cleanedText,
@@ -156,7 +176,7 @@ export default function RoomPage() {
 
         if (!res.ok) {
           const errData = await res.json();
-          throw new Error(errData.error || 'Errore nella traduzione');
+          throw new Error(errData.error || 'Translation Error');
         }
 
         const data = await res.json();
@@ -172,14 +192,11 @@ export default function RoomPage() {
           timestamp: Date.now(),
         };
 
-        // Aggiorna stato locale
         setMessages((prev) => [...prev, newMsg]);
-
-        // Invia agli altri
         broadcastMessage(newMsg);
       } catch (error: any) {
         console.error('Errore durante la traduzione:', error);
-        setErrorBanner(error?.message || 'Errore elaborazione Gemini AI');
+        setErrorBanner(error?.message || 'Error processing AI translation');
         setTimeout(() => setErrorBanner(null), 5000);
       } finally {
         setIsProcessing(false);
@@ -198,7 +215,6 @@ export default function RoomPage() {
       lang: langObj.speechCode,
       onInterim: (text) => {
         setInterimText(text);
-        // Resetta eventuale timer di silenzio
         clearTimeout(pendingSpeechTimeoutRef.current);
       },
       onFinal: (text) => {
@@ -207,7 +223,7 @@ export default function RoomPage() {
         processAndTranslateSpeech(text);
       },
       onError: (err) => {
-        console.warn('Errore riconoscimento vocale:', err);
+        console.warn('Speech recognition error:', err);
       },
       onStatusChange: (listening) => {
         setIsListening(listening);
@@ -237,13 +253,12 @@ export default function RoomPage() {
     }
   };
 
-  // Setup sincronizzazione Stanza (WebRTC PeerJS + HTTP Polling Fallback)
+  // Setup sincronizzazione Stanza
   useEffect(() => {
     if (!isConfigured || !userId || !roomId) return;
 
     let isMounted = true;
 
-    // 1. Unisciti alla stanza via API Server
     const joinRoom = async () => {
       try {
         const res = await fetch(`/api/rooms/${roomId}`, {
@@ -269,13 +284,12 @@ export default function RoomPage() {
           }
         }
       } catch (err) {
-        console.warn('Errore join room:', err);
+        console.warn('Error joining room:', err);
       }
     };
 
     joinRoom();
 
-    // 2. Heartbeat e polling messaggi per garantire 100% di ricezione su mobile
     const pollInterval = setInterval(async () => {
       try {
         const res = await fetch(`/api/rooms/${roomId}`);
@@ -289,11 +303,9 @@ export default function RoomPage() {
 
           if (data.messages && Array.isArray(data.messages)) {
             setMessages((prev) => {
-              // Merge messaggi mancanti
               const existingIds = new Set(prev.map((m) => m.id));
               const missing = data.messages.filter((m: TranslationMessage) => !existingIds.has(m.id));
               if (missing.length > 0) {
-                // Se arriva un messaggio da un altro utente ed è attivo il TTS, leggilo
                 if (ttsEnabled) {
                   const latestOther = missing[missing.length - 1];
                   if (latestOther.speakerId !== userId) {
@@ -309,7 +321,6 @@ export default function RoomPage() {
           }
         }
 
-        // Heartbeat presenza
         await fetch(`/api/rooms/${roomId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -319,20 +330,16 @@ export default function RoomPage() {
           }),
         });
       } catch (err) {
-        // Ignore polling errors
+        // Ignore
       }
     }, 2000);
 
-    // 3. Inizializzazione PeerJS per WebRTC ultra-rapido (client side only)
+    // Inizializzazione PeerJS
     import('peerjs').then(({ default: Peer }) => {
       if (!isMounted) return;
 
       const peer = new Peer();
       peerInstanceRef.current = peer;
-
-      peer.on('open', (id) => {
-        // Registra peer ID
-      });
 
       peer.on('connection', (conn) => {
         connectedPeersRef.current.set(conn.peer, conn);
@@ -342,7 +349,6 @@ export default function RoomPage() {
             const incomingMsg: TranslationMessage = payload.data;
             setMessages((prev) => {
               if (prev.some((m) => m.id === incomingMsg.id)) return prev;
-              // Lettura vocale automatica se abilitata
               if (ttsEnabled && incomingMsg.speakerId !== userId) {
                 const speechContent =
                   incomingMsg.translations[userLang] || incomingMsg.cleanedText;
@@ -365,7 +371,6 @@ export default function RoomPage() {
       if (peerInstanceRef.current) {
         peerInstanceRef.current.destroy();
       }
-      // Notifica uscita
       fetch(`/api/rooms/${roomId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -377,7 +382,7 @@ export default function RoomPage() {
     };
   }, [isConfigured, userId, userName, userLang, roomId, ttsEnabled]);
 
-  // Se l'utente non è ancora configurato (es. è entrato da QR code o link diretto)
+  // Se l'utente non è ancora configurato (es. entrato direttamente con QR o link)
   if (!isConfigured) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -386,20 +391,25 @@ export default function RoomPage() {
             <div className="inline-flex p-3 rounded-2xl bg-indigo-500/10 text-indigo-400 mb-3">
               <Users className="w-8 h-8" />
             </div>
-            <h2 className="text-2xl font-bold text-white mb-1">Entra nella Stanza</h2>
+            <h2 className="text-2xl font-bold text-white mb-1">
+              {t.joinRoomModalTitle}
+            </h2>
             <p className="text-xs text-slate-400">
-              Stanza: <span className="font-mono text-indigo-400 font-bold">{roomId.toUpperCase()}</span>
+              {t.roomLabel}:{' '}
+              <span className="font-mono text-indigo-400 font-bold">
+                {roomId.toUpperCase()}
+              </span>
             </p>
           </div>
 
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">
-                Il tuo nome
+                {t.yourName}
               </label>
               <input
                 type="text"
-                placeholder="Come ti chiami?"
+                placeholder={t.namePlaceholder}
                 value={userName}
                 onChange={(e) => setUserName(e.target.value)}
                 maxLength={20}
@@ -408,14 +418,15 @@ export default function RoomPage() {
             </div>
 
             <LanguageSelector
-              label="La tua lingua preferita"
+              label={t.yourLanguage}
               selectedCode={userLang}
               onSelect={setUserLang}
             />
 
             <button
               onClick={() => {
-                const finalName = userName.trim() || 'Ospite';
+                const finalName =
+                  userName.trim() || (uiLang === 'ja' ? 'ゲスト' : 'Guest');
                 setUserName(finalName);
                 sessionStorage.setItem('livelang_user_name', finalName);
                 sessionStorage.setItem('livelang_user_lang', userLang);
@@ -423,7 +434,7 @@ export default function RoomPage() {
               }}
               className="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition shadow-lg shadow-indigo-600/30 active:scale-95 mt-2"
             >
-              Unisciti alla Traduzione
+              {t.joinRoomSubmit}
             </button>
           </div>
         </div>
@@ -444,7 +455,7 @@ export default function RoomPage() {
             <button
               onClick={() => router.push('/')}
               className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white transition border border-slate-800"
-              title="Esci dalla stanza"
+              title={t.leaveRoom}
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
@@ -459,8 +470,8 @@ export default function RoomPage() {
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 <span>
                   {otherParticipants.length === 0
-                    ? 'In attesa di altri telefoni...'
-                    : `${otherParticipants.length + 1} collegati`}
+                    ? t.waitingOthers
+                    : t.connectedCount(otherParticipants.length + 1)}
                 </span>
               </div>
             </div>
@@ -468,13 +479,22 @@ export default function RoomPage() {
 
           {/* Right Action Icons */}
           <div className="flex items-center gap-1.5">
+            {/* UI Language Switcher */}
+            <button
+              onClick={handleToggleUiLang}
+              className="py-1.5 px-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300 hover:text-white text-xs font-medium transition"
+              title={t.changeUiLang}
+            >
+              {uiLang === 'ja' ? '🇯🇵 日本語' : '🇬🇧 EN'}
+            </button>
+
             {/* Audio TTS toggle */}
             <button
               onClick={() => {
                 const nextState = !ttsEnabled;
                 setTtsEnabled(nextState);
                 if (nextState) {
-                  speakText('Audio abilitato', myLanguage.speechCode);
+                  speakText(t.ttsActive, myLanguage.speechCode);
                 }
               }}
               className={`p-2.5 rounded-xl transition border ${
@@ -482,7 +502,7 @@ export default function RoomPage() {
                   ? 'bg-purple-600/20 border-purple-500/40 text-purple-300'
                   : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white'
               }`}
-              title={ttsEnabled ? 'Disattiva sintesi vocale' : 'Attiva sintesi vocale (ascolta in cuffia)'}
+              title={ttsEnabled ? t.ttsDisableTooltip : t.ttsEnableTooltip}
             >
               {ttsEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             </button>
@@ -493,22 +513,26 @@ export default function RoomPage() {
               className="flex items-center gap-1.5 py-2 px-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition active:scale-95"
             >
               <QrCode className="w-4 h-4" />
-              <span className="hidden sm:inline">Invita</span>
+              <span className="hidden sm:inline">{t.inviteBtn}</span>
             </button>
           </div>
         </div>
 
         {/* Participants Pill Strip */}
         <div className="max-w-2xl mx-auto mt-2 pt-2 border-t border-slate-800/40 flex items-center gap-2 overflow-x-auto no-scrollbar">
-          <span className="text-[10px] uppercase font-bold text-slate-400 shrink-0">Lobby:</span>
+          <span className="text-[10px] uppercase font-bold text-slate-400 shrink-0">
+            {t.lobby}:
+          </span>
           <div className="flex items-center gap-1.5">
-            {/* Tu */}
+            {/* You */}
             <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-950/80 border border-indigo-500/40 text-xs text-indigo-200">
               <span>{myLanguage.flag}</span>
-              <span className="font-semibold">{userName} (Tu)</span>
+              <span className="font-semibold">
+                {userName} {t.youBadge}
+              </span>
             </div>
 
-            {/* Altri partecipanti */}
+            {/* Other participants */}
             {otherParticipants.map((p) => {
               const lang = getLanguage(p.language);
               return (
@@ -540,10 +564,10 @@ export default function RoomPage() {
               <Radio className="w-10 h-10 text-indigo-400 animate-pulse" />
             </div>
             <h3 className="text-base font-semibold text-slate-200 mb-1">
-              La stanza è pronta
+              {t.roomReadyTitle}
             </h3>
             <p className="text-xs text-slate-400 max-w-xs leading-relaxed mb-4">
-              Premi il microfono in basso e parla normalmente in {myLanguage.name}. Gemini correggerà le esitazioni e tradurrà per gli altri partecipanti.
+              {t.roomReadyDesc(myLanguage.name)}
             </p>
             {otherParticipants.length === 0 && (
               <button
@@ -551,7 +575,7 @@ export default function RoomPage() {
                 className="inline-flex items-center gap-2 py-2 px-4 rounded-xl bg-slate-900 border border-slate-700 text-indigo-400 hover:text-indigo-300 text-xs font-medium"
               >
                 <Share2 className="w-3.5 h-3.5" />
-                <span>Condividi QR con l'altra persona</span>
+                <span>{t.shareQrWithOther}</span>
               </button>
             )}
           </div>
@@ -562,9 +586,6 @@ export default function RoomPage() {
           const isMe = msg.speakerId === userId;
           const speakerLangObj = getLanguage(msg.speakerLang);
 
-          // Testo da mostrare a questo utente:
-          // Se ho parlato io: mostro la mia frase ripulita dall'AI
-          // Se ha parlato un altro: mostro la traduzione nella mia lingua
           const translatedForMe = isMe
             ? msg.cleanedText
             : msg.translations[userLang] || msg.cleanedText;
@@ -577,7 +598,7 @@ export default function RoomPage() {
               {/* Speaker info */}
               <div className="flex items-center gap-1.5 mb-1 px-1 text-[11px] text-slate-400">
                 <span>{speakerLangObj.flag}</span>
-                <span className="font-semibold">{isMe ? 'Tu' : msg.speakerName}</span>
+                <span className="font-semibold">{isMe ? t.youSpoke : msg.speakerName}</span>
                 <span className="text-[10px] text-slate-400">
                   {new Date(msg.timestamp).toLocaleTimeString([], {
                     hour: '2-digit',
@@ -605,11 +626,11 @@ export default function RoomPage() {
                     {isMe ? (
                       <span className="flex items-center gap-1 text-indigo-300">
                         <Sparkles className="w-3 h-3 text-indigo-400 shrink-0" />
-                        Frase ripulita e tradotta agli altri
+                        {t.cleanedAndTranslated}
                       </span>
                     ) : (
                       <span className="italic">
-                        Originale ({speakerLangObj.name}): &ldquo;{msg.cleanedText}&rdquo;
+                        {t.originalText(speakerLangObj.name, msg.cleanedText)}
                       </span>
                     )}
                   </div>
@@ -620,7 +641,7 @@ export default function RoomPage() {
                       speakText(translatedForMe, myLanguage.speechCode)
                     }
                     className="p-1 text-slate-400 hover:text-indigo-400 rounded transition shrink-0"
-                    title="Ascolta pronuncia"
+                    title={t.listenAudio}
                   >
                     <Volume2 className="w-3.5 h-3.5" />
                   </button>
@@ -635,7 +656,7 @@ export default function RoomPage() {
           <div className="flex flex-col items-end">
             <div className="flex items-center gap-1.5 mb-1 px-1 text-[11px] text-indigo-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              <span>Stai parlando...</span>
+              <span>{t.speakingNow}</span>
             </div>
             <div className="max-w-[85%] rounded-2xl p-4 bg-indigo-950/40 border border-indigo-500/50 text-indigo-200 italic rounded-tr-none shadow-lg animate-pulse">
               &ldquo;{interimText}&rdquo;
@@ -655,6 +676,12 @@ export default function RoomPage() {
             hasInterimSpeech={Boolean(interimText)}
             onToggle={toggleListening}
             languageFlag={myLanguage.flag}
+            labels={{
+              tapToStart: t.micTapToStart,
+              activeListening: t.micActiveListening,
+              hearingYou: t.micHearingYou,
+              aiProcessing: t.micAiProcessing,
+            }}
           />
         </div>
       </footer>
@@ -664,6 +691,7 @@ export default function RoomPage() {
         isOpen={isQrOpen}
         onClose={() => setIsQrOpen(false)}
         roomId={roomId}
+        uiLang={uiLang}
       />
     </div>
   );

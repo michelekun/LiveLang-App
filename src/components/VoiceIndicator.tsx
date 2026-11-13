@@ -9,6 +9,12 @@ interface VoiceIndicatorProps {
   hasInterimSpeech: boolean;
   onToggle: () => void;
   languageFlag: string;
+  labels?: {
+    tapToStart: string;
+    activeListening: string;
+    hearingYou: string;
+    aiProcessing: string;
+  };
 }
 
 export function VoiceIndicator({
@@ -17,14 +23,28 @@ export function VoiceIndicator({
   hasInterimSpeech,
   onToggle,
   languageFlag,
+  labels,
 }: VoiceIndicatorProps) {
+  const lbl = labels || {
+    tapToStart: 'Tap to start speaking',
+    activeListening: 'Microphone active (speak freely)',
+    hearingYou: 'Listening to you...',
+    aiProcessing: 'AI contextual translation...',
+  };
+
   return (
     <div className="flex flex-col items-center justify-center gap-3">
       <div className="relative">
         {/* Animated wave rings when speaking or listening */}
         {isListening && (
           <>
-            <div className={`absolute -inset-2 rounded-full border-2 ${hasInterimSpeech ? 'border-emerald-400 animate-ping opacity-60' : 'border-indigo-500/40 animate-pulse'}`} />
+            <div
+              className={`absolute -inset-2 rounded-full border-2 ${
+                hasInterimSpeech
+                  ? 'border-emerald-400 animate-ping opacity-60'
+                  : 'border-indigo-500/40 animate-pulse'
+              }`}
+            />
             <div className="absolute -inset-4 rounded-full border border-indigo-400/20 animate-pulse" />
           </>
         )}
@@ -39,7 +59,7 @@ export function VoiceIndicator({
                 : 'bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-indigo-500/30 ring-4 ring-indigo-500/20'
               : 'bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-600 hover:text-slate-200 shadow-slate-900/40'
           }`}
-          aria-label={isListening ? 'Ferma microfono' : 'Attiva microfono'}
+          aria-label={isListening ? 'Stop microphone' : 'Start microphone'}
         >
           {isListening ? (
             hasInterimSpeech ? (
@@ -67,22 +87,22 @@ export function VoiceIndicator({
         {isProcessing ? (
           <span className="flex items-center gap-1.5 text-amber-400 animate-pulse">
             <Sparkles className="w-3.5 h-3.5" />
-            Rielaborazione contestuale AI...
+            {lbl.aiProcessing}
           </span>
         ) : isListening ? (
           hasInterimSpeech ? (
             <span className="flex items-center gap-1.5 text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              Ti sto ascoltando...
+              {lbl.hearingYou}
             </span>
           ) : (
             <span className="flex items-center gap-1.5 text-indigo-400">
               <span className="w-2 h-2 rounded-full bg-indigo-400" />
-              Microfono attivo (parla pure)
+              {lbl.activeListening}
             </span>
           )
         ) : (
-          <span className="text-slate-400">Tocca per iniziare a parlare</span>
+          <span className="text-slate-400">{lbl.tapToStart}</span>
         )}
       </div>
     </div>
