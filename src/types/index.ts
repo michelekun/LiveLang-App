@@ -33,7 +33,9 @@ export interface RoomState {
 }
 
 export interface TranslateApiRequest {
-  text: string;
+  text?: string;
+  audioBase64?: string;
+  audioMimeType?: string;
   speakerLang: string;
   targetLangs: string[];
   recentHistory?: {

@@ -6,7 +6,7 @@ import { SUPPORTED_LANGUAGES, getLanguage } from '@/lib/languages';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { VoiceIndicator } from '@/components/VoiceIndicator';
 import { QRCodeModal } from '@/components/QRCodeModal';
-import { SpeechRecognizer, speakText } from '@/lib/speech';
+import { HybridVoiceEngine, speakText } from '@/lib/speech';
 import { TranslationMessage, UserParticipant, RoomState } from '@/types';
 import { UILanguage, UI_TRANSLATIONS } from '@/lib/i18n';
 import {
@@ -51,12 +51,12 @@ export default function RoomPage() {
   const [isListening, setIsListening] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [interimText, setInterimText] = useState<string>('');
+  const [volumeLevel, setVolumeLevel] = useState<number>(0);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
-  // References per evitare re-render ciclici e arresti del microfono
-  const speechRecognizerRef = useRef<SpeechRecognizer | null>(null);
+  // References
+  const voiceEngineRef = useRef<HybridVoiceEngine | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const pendingSpeechTimeoutRef = useRef<any>(null);
   const peerInstanceRef = useRef<any>(null);
   const connectedPeersRef = useRef<Map<string, any>>(new Map());
   const messagesRef = useRef<TranslationMessage[]>([]);
@@ -65,7 +65,9 @@ export default function RoomPage() {
   const participantsRef = useRef<Record<string, UserParticipant>>({});
   participantsRef.current = participants;
 
-  const processAndTranslateSpeechRef = useRef<(text: string) => void>(() => {});
+  const processAndTranslateRef = useRef<
+    (params: { text?: string; audioBase64?: string; audioMimeType?: string }) => void
+  >(() => {});
 
   // Inizializzazione utente e UI language
   useEffect(() => {
@@ -137,10 +139,11 @@ export default function RoomPage() {
     [roomId]
   );
 
-  // Funzione di elaborazione AI con Gemini
-  const processAndTranslateSpeech = useCallback(
-    async (rawUtterance: string) => {
-      if (!rawUtterance || !rawUtterance.trim() || isProcessing) return;
+  // Elaborazione AI con Gemini (accetta sia Testo sia Audio Base64 diretto)
+  const processAndTranslate = useCallback(
+    async (input: { text?: string; audioBase64?: string; audioMimeType?: string }) => {
+      if ((!input.text || !input.text.trim()) && !input.audioBase64) return;
+      if (isProcessing) return;
 
       setIsProcessing(true);
       setInterimText('');
@@ -168,7 +171,9 @@ export default function RoomPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: rawUtterance,
+            text: input.text,
+            audioBase64: input.audioBase64,
+            audioMimeType: input.audioMimeType,
             speakerLang: userLang,
             targetLangs,
             recentHistory,
@@ -182,13 +187,18 @@ export default function RoomPage() {
 
         const data = await res.json();
 
+        if (!data.cleanedText || !data.cleanedText.trim()) {
+          // Nessun parlato rilevato nell'audio
+          return;
+        }
+
         const newMsg: TranslationMessage = {
           id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
           speakerId: userId,
           speakerName: userName,
           speakerLang: userLang,
-          rawText: rawUtterance,
-          cleanedText: data.cleanedText || rawUtterance,
+          rawText: input.text || data.cleanedText,
+          cleanedText: data.cleanedText,
           translations: data.translations || {},
           timestamp: Date.now(),
         };
@@ -206,60 +216,70 @@ export default function RoomPage() {
     [isProcessing, userLang, userId, userName, broadcastMessage]
   );
 
-  // Mantiene aggiornata la ref per la callback
-  processAndTranslateSpeechRef.current = processAndTranslateSpeech;
+  processAndTranslateRef.current = processAndTranslate;
 
-  // Configurazione Riconoscimento Vocale (STABILE: non viene ricreato a ogni re-render/polling)
+  // Inizializzazione Hybrid Voice Engine
   useEffect(() => {
     if (!isConfigured) return;
 
     const langObj = getLanguage(userLang);
 
-    if (speechRecognizerRef.current) {
-      speechRecognizerRef.current.updateLanguage(langObj.speechCode);
+    if (voiceEngineRef.current) {
+      voiceEngineRef.current.updateLanguage(langObj.speechCode);
       return;
     }
 
-    const recognizer = new SpeechRecognizer({
+    const engine = new HybridVoiceEngine({
       lang: langObj.speechCode,
       onInterim: (text) => {
         setInterimText(text);
-        clearTimeout(pendingSpeechTimeoutRef.current);
       },
-      onFinal: (text) => {
+      onFinalText: (text) => {
         setInterimText('');
-        clearTimeout(pendingSpeechTimeoutRef.current);
-        processAndTranslateSpeechRef.current(text);
+        processAndTranslateRef.current({ text });
+      },
+      onFinalAudio: (audioBase64, mimeType) => {
+        setInterimText('');
+        processAndTranslateRef.current({ audioBase64, audioMimeType: mimeType });
+      },
+      onVolumeChange: (vol) => {
+        setVolumeLevel(vol);
       },
       onError: (err) => {
-        console.warn('Speech recognition error:', err);
+        setErrorBanner(err);
+        setTimeout(() => setErrorBanner(null), 6000);
       },
       onStatusChange: (listening) => {
         setIsListening(listening);
+        if (!listening) {
+          setVolumeLevel(0);
+        }
       },
     });
 
-    speechRecognizerRef.current = recognizer;
+    voiceEngineRef.current = engine;
 
     return () => {
-      recognizer.stop();
-      clearTimeout(pendingSpeechTimeoutRef.current);
-      speechRecognizerRef.current = null;
+      engine.stop();
+      voiceEngineRef.current = null;
     };
   }, [isConfigured, userLang]);
 
   // Gestione toggle microfono
-  const toggleListening = () => {
-    if (!speechRecognizerRef.current) return;
+  const toggleListening = async () => {
+    if (!voiceEngineRef.current) return;
 
     if (isListening) {
-      speechRecognizerRef.current.stop();
+      await voiceEngineRef.current.stop();
       setIsListening(false);
       setInterimText('');
+      setVolumeLevel(0);
     } else {
       setErrorBanner(null);
-      speechRecognizerRef.current.start();
-      setIsListening(true);
+      const started = await voiceEngineRef.current.start();
+      if (started) {
+        setIsListening(true);
+      }
     }
   };
 
@@ -560,8 +580,8 @@ export default function RoomPage() {
 
       {/* Error Banner */}
       {errorBanner && (
-        <div className="bg-rose-500/90 text-white text-xs font-medium py-2 px-4 text-center">
-          {errorBanner}
+        <div className="bg-rose-500 text-white text-xs font-semibold py-2.5 px-4 text-center shadow-lg animate-pulse">
+          ⚠️ {errorBanner}
         </div>
       )}
 
@@ -683,6 +703,7 @@ export default function RoomPage() {
             isListening={isListening}
             isProcessing={isProcessing}
             hasInterimSpeech={Boolean(interimText)}
+            volumeLevel={volumeLevel}
             onToggle={toggleListening}
             languageFlag={myLanguage.flag}
             labels={{

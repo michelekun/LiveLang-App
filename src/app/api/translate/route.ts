@@ -5,7 +5,6 @@ import { getLanguage } from '@/lib/languages';
 
 const apiKey = process.env.GEMINI_API_KEY || '';
 
-// Lista di modelli in ordine di priorità per resilienza totale (failover automatico)
 const CANDIDATE_MODELS = [
   'gemini-3.5-flash',
   'gemini-3.8-flash',
@@ -22,10 +21,10 @@ export async function POST(req: NextRequest) {
     }
 
     const body: TranslateApiRequest = await req.json();
-    const { text, speakerLang, targetLangs, recentHistory } = body;
+    const { text, audioBase64, audioMimeType, speakerLang, targetLangs, recentHistory } = body;
 
-    if (!text || !text.trim()) {
-      return NextResponse.json({ error: 'Testo mancante' }, { status: 400 });
+    if ((!text || !text.trim()) && !audioBase64) {
+      return NextResponse.json({ error: 'Nessun testo o audio fornito' }, { status: 400 });
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
@@ -40,7 +39,49 @@ export async function POST(req: NextRequest) {
       .map((h) => `${h.speaker}: ${h.text}`)
       .join('\n');
 
-    const prompt = `
+    let promptContent: any[];
+
+    if (audioBase64) {
+      // Audio diretto (stile Whisper ma con rielaborazione Gemini integrata)
+      const prompt = `
+Sei un interprete simultaneo d'élite per conversazioni dal vivo tra persone di lingue diverse.
+Ascolta con attenzione questo file audio registrato dal microfono in lingua ${speakerLangObj.name} (${speakerLangObj.code}).
+
+CONTESTO DELLA CONVERSAZIONE RECENTE:
+${historyContext ? historyContext : '(Inizio conversazione)'}
+
+LINGUE DI DESTINAZIONE RICHIESTE:
+${
+  targetLangsObj.length > 0
+    ? targetLangsObj.map((l) => `${l.name} (${l.code})`).join(', ')
+    : 'Nessuna lingua aggiuntiva richiesta'
+}
+
+IL TUO COMPITO:
+1. "cleanedText": Trascrivi e rielabora la frase pronunciata nell'audio in ${speakerLangObj.name}. Elimina tutti gli intercalari (es. "ehm", "cioè", "tipo", "uh", "you know", "ano..."), balbettii, ripetizioni involontarie e autocorrezioni. Rendi la frase naturale, fluida e chiara. Se nell'audio c'è solo silenzio o rumore di fondo senza parole intelligibili, restituisci stringa vuota "".
+2. "translations": Traduci la frase rielaborata in ciascuna lingua target richiesta (${targetLangsObj.map((l) => l.code).join(', ')}). NON fare traduzioni letterali stile dizionario; adatta il parlato a espressioni naturali che userebbe un madrelingua nel contesto del dialogo.
+3. Se l'audio non contiene parlato o non ci sono lingue target, "translations" sarà un oggetto vuoto {}.
+
+RISPONDI ESCLUSIVAMENTE con un JSON nel seguente formato:
+{
+  "cleanedText": "stringa della frase ripulita nella lingua originale",
+  "translations": {
+    ${targetLangsObj.map((l) => `"${l.code}": "stringa tradotta"`).join(',\n    ')}
+  }
+}
+`;
+      promptContent = [
+        {
+          inlineData: {
+            mimeType: audioMimeType || 'audio/webm',
+            data: audioBase64,
+          },
+        },
+        prompt,
+      ];
+    } else {
+      // Trascrizione testuale
+      const prompt = `
 Sei un interprete simultaneo d'élite per conversazioni dal vivo tra persone che parlano lingue diverse.
 
 CONTESTO DELLA CONVERSAZIONE RECENTE:
@@ -50,10 +91,10 @@ NUOVO INPUT PARLATO:
 - Lingua dell'oratore: ${speakerLangObj.name} (${speakerLangObj.code})
 - Trascrizione grezza del microfono: "${text}"
 - Lingue di destinazione richieste: ${
-      targetLangsObj.length > 0
-        ? targetLangsObj.map((l) => `${l.name} (${l.code})`).join(', ')
-        : 'Nessuna lingua aggiuntiva richiesta'
-    }
+        targetLangsObj.length > 0
+          ? targetLangsObj.map((l) => `${l.name} (${l.code})`).join(', ')
+          : 'Nessuna lingua aggiuntiva richiesta'
+      }
 
 IL TUO COMPITO:
 1. "cleanedText": Rielabora la frase nella lingua originale (${speakerLangObj.name}). Elimina intercalari inutili (es. "ehm", "cioè", "tipo", "like", "uh", "insomma"), balbettii, ripetizioni involontarie e autocorrezioni tipiche del parlato frettoloso. Rendi la frase naturale, fluida e chiara, preservando al 100% l'intenzione e il tono emotivo di chi parla.
@@ -68,11 +109,12 @@ RISPONDI ESCLUSIVAMENTE con un JSON nel seguente formato:
   }
 }
 `;
+      promptContent = [prompt];
+    }
 
     let responseText = '';
     let lastError: any = null;
 
-    // Tentativo con failover automatico
     for (const modelName of CANDIDATE_MODELS) {
       try {
         const model = genAI.getGenerativeModel({
@@ -82,7 +124,7 @@ RISPONDI ESCLUSIVAMENTE con un JSON nel seguente formato:
             temperature: 0.3,
           },
         });
-        const result = await model.generateContent(prompt);
+        const result = await model.generateContent(promptContent);
         responseText = result.response.text();
         if (responseText) break;
       } catch (err: any) {
@@ -94,13 +136,13 @@ RISPONDI ESCLUSIVAMENTE con un JSON nel seguente formato:
     if (!responseText) {
       throw lastError || new Error('Nessun modello ha risposto');
     }
-    
+
     let parsed: TranslateApiResponse;
     try {
       parsed = JSON.parse(responseText);
     } catch {
       parsed = {
-        cleanedText: text,
+        cleanedText: text || '',
         translations: {},
       };
     }
