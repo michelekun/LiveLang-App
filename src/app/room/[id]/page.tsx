@@ -53,7 +53,7 @@ export default function RoomPage() {
   const [interimText, setInterimText] = useState<string>('');
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
-  // References
+  // References per evitare re-render ciclici e arresti del microfono
   const speechRecognizerRef = useRef<SpeechRecognizer | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const pendingSpeechTimeoutRef = useRef<any>(null);
@@ -62,9 +62,13 @@ export default function RoomPage() {
   const messagesRef = useRef<TranslationMessage[]>([]);
   messagesRef.current = messages;
 
+  const participantsRef = useRef<Record<string, UserParticipant>>({});
+  participantsRef.current = participants;
+
+  const processAndTranslateSpeechRef = useRef<(text: string) => void>(() => {});
+
   // Inizializzazione utente e UI language
   useEffect(() => {
-    // Carica preferenza lingua interfaccia
     const savedUiLang = (localStorage.getItem('livelang_ui_lang') ||
       sessionStorage.getItem('livelang_ui_lang')) as UILanguage | null;
     if (savedUiLang === 'en' || savedUiLang === 'ja') {
@@ -86,7 +90,6 @@ export default function RoomPage() {
       setUserLang(savedLang);
       setIsConfigured(true);
     } else {
-      // Se è entrato direttamente con link o QR code
       setUserLang(savedUiLang === 'ja' ? 'ja' : 'en');
     }
   }, []);
@@ -108,7 +111,6 @@ export default function RoomPage() {
   // Invio messaggio a tutti i peer WebRTC e salvataggio sul server
   const broadcastMessage = useCallback(
     async (newMessage: TranslationMessage) => {
-      // 1. Invio tramite connessione diretta WebRTC DataChannel (istantaneo <50ms)
       connectedPeersRef.current.forEach((conn) => {
         if (conn.open) {
           try {
@@ -119,7 +121,6 @@ export default function RoomPage() {
         }
       });
 
-      // 2. Salvataggio su endpoint HTTP per backup e sincronizzazione affidabile
       try {
         await fetch(`/api/rooms/${roomId}`, {
           method: 'POST',
@@ -145,7 +146,7 @@ export default function RoomPage() {
       setInterimText('');
 
       try {
-        const activeParticipants = Object.values(participants);
+        const activeParticipants = Object.values(participantsRef.current);
         const targetLangs = Array.from(
           new Set(
             activeParticipants
@@ -202,14 +203,22 @@ export default function RoomPage() {
         setIsProcessing(false);
       }
     },
-    [isProcessing, participants, userLang, userId, userName, broadcastMessage]
+    [isProcessing, userLang, userId, userName, broadcastMessage]
   );
 
-  // Configurazione Riconoscimento Vocale
+  // Mantiene aggiornata la ref per la callback
+  processAndTranslateSpeechRef.current = processAndTranslateSpeech;
+
+  // Configurazione Riconoscimento Vocale (STABILE: non viene ricreato a ogni re-render/polling)
   useEffect(() => {
     if (!isConfigured) return;
 
     const langObj = getLanguage(userLang);
+
+    if (speechRecognizerRef.current) {
+      speechRecognizerRef.current.updateLanguage(langObj.speechCode);
+      return;
+    }
 
     const recognizer = new SpeechRecognizer({
       lang: langObj.speechCode,
@@ -220,7 +229,7 @@ export default function RoomPage() {
       onFinal: (text) => {
         setInterimText('');
         clearTimeout(pendingSpeechTimeoutRef.current);
-        processAndTranslateSpeech(text);
+        processAndTranslateSpeechRef.current(text);
       },
       onError: (err) => {
         console.warn('Speech recognition error:', err);
@@ -235,8 +244,9 @@ export default function RoomPage() {
     return () => {
       recognizer.stop();
       clearTimeout(pendingSpeechTimeoutRef.current);
+      speechRecognizerRef.current = null;
     };
-  }, [isConfigured, userLang, processAndTranslateSpeech]);
+  }, [isConfigured, userLang]);
 
   // Gestione toggle microfono
   const toggleListening = () => {
@@ -382,7 +392,6 @@ export default function RoomPage() {
     };
   }, [isConfigured, userId, userName, userLang, roomId, ttsEnabled]);
 
-  // Se l'utente non è ancora configurato (es. entrato direttamente con QR o link)
   if (!isConfigured) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">

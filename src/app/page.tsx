@@ -170,17 +170,17 @@ export default function HomePage() {
       <div className="max-w-md w-full mx-auto relative z-10 flex-1 flex flex-col justify-center">
         {/* Header Branding */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold mb-4">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold mb-3">
             <Radio className="w-3.5 h-3.5 animate-pulse text-indigo-400" />
             <span>{t.appTag}</span>
           </div>
 
-          <h1 className="text-4xl sm:text-5xl font-black tracking-tight mb-3">
+          <h1 className="text-4xl sm:text-5xl font-black tracking-tight mb-1">
             {t.appTitle}
             <span className="text-gradient">{t.appTitleHighlight}</span>
           </h1>
-          <p className="text-slate-400 text-sm sm:text-base leading-relaxed">
-            {t.appSubtitle}
+          <p className="text-slate-400 text-sm sm:text-base font-medium tracking-wide">
+            (by Michele Angelici)
           </p>
         </div>
 
@@ -230,20 +230,20 @@ export default function HomePage() {
               <div className="flex-grow border-t border-slate-800"></div>
             </div>
 
-            {/* Action: Join Room Form */}
-            <form onSubmit={handleJoinRoom} className="flex gap-2">
+            {/* Action: Join Room Form (Perfettamente contenuto all'interno del riquadro) */}
+            <form onSubmit={handleJoinRoom} className="flex gap-2 w-full">
               <input
                 type="text"
                 placeholder={t.roomCodePlaceholder}
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value)}
                 maxLength={10}
-                className="flex-1 bg-slate-900/90 text-white font-mono text-center uppercase tracking-widest font-semibold py-3 px-4 rounded-xl border border-slate-700/80 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 placeholder:text-slate-500 placeholder:font-sans placeholder:tracking-normal transition"
+                className="min-w-0 flex-1 bg-slate-900/90 text-white font-mono text-center uppercase tracking-widest font-semibold py-3 px-3 rounded-xl border border-slate-700/80 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 placeholder:text-slate-500 placeholder:font-sans placeholder:tracking-normal placeholder:text-xs transition text-sm"
               />
               <button
                 type="submit"
                 disabled={!joinCode.trim()}
-                className="py-3 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-slate-200 font-semibold text-sm transition border border-slate-700 flex items-center gap-1.5 active:scale-95"
+                className="shrink-0 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-slate-200 font-semibold text-sm transition border border-slate-700 flex items-center gap-1.5 active:scale-95"
               >
                 <span>{t.joinButton}</span>
                 <ArrowRight className="w-4 h-4" />
@@ -280,7 +280,7 @@ export default function HomePage() {
 
       {/* Footer */}
       <footer className="text-center text-xs text-slate-400 pt-6 relative z-10">
-        {t.footerText}
+        All rights reserved
       </footer>
     </main>
   );
